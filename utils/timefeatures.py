@@ -149,6 +149,6 @@ def time_features(dates, timeenc=1, freq='h'):
             't':['month','day','weekday','hour','minute'],
         }
         return dates[freq_map[freq.lower()]].values
-    if timeenc==1:
+    if timeenc==1:   #pred进入的是这个
         dates = pd.to_datetime(dates.date.values)
         return np.vstack([feat(dates) for feat in time_features_from_frequency_str(freq)]).transpose(1,0)

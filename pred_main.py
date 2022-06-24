@@ -8,7 +8,7 @@ import torch
 import matplotlib.pyplot as plt
 import pandas as pd
 import datetime
-
+from utils import tools
 
 if not 'Informer2020' in sys.path:
     sys.path += ['Informer2020']
@@ -98,7 +98,7 @@ args.detail_freq = args.freq
 args.freq = args.freq[-1:]
 print('Args in experiment:')
 print(args)
-Exp = Exp_Informer
+Exp = Exp_Informer  #这里没进入
 for ii in range(args.itr):
     # setting record of experiments
     setting = '{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_at{}_fc{}_eb{}_dt{}_mx{}_{}_{}'.format(args.model, args.data, args.features,
@@ -109,11 +109,39 @@ for ii in range(args.itr):
 #设置读取的checkpoint
 setting = 'informer_ETTh1_ftM_sl96_ll48_pl24_dm512_nh8_el2_dl1_df2048_atprob_fc5_ebtimeF_dtTrue_mxTrue_test_0'
 # prediction = np.load('./results/'+setting+'/real_prediction.npy')  #加载要用到的checkpoint
-exp = Exp(args)   #就是在这里调用了,最后是一个exp_informer??都没有getdata吗???
+exp = Exp(args)   #这里进入了，返回的是一个model，这个应该是初始化？
 torch.cuda.empty_cache()
+# standardscaler = tools.StandardScaler
+
+
+#获取初始时间，之后可以需要得到多长时间的历史数据，作为历史数据的x
+df_raw = pd.read_csv(os.path.join(args.root_path,args.data_path))  #整个csv文件
+df_stamp = df_raw[['date']]   #取出指定范围内的序列数据的'date'列
+df_stamp['date'] = pd.to_datetime(df_stamp.date)  #时间格式的处理
+#作为历史数据的y:df_data
+if args.features == 'M':
+    cols_data = df_raw.columns[1:]  # 获取除了时间列以外的特征,这里应该是只获取到了列名，.columns只是返回列标签
+    #看这部分如何获取到数据的mean和std
+    mean = df_raw[[args.target]].mean(0)  #是series？(OT,mean) #mean(0)是代表每一列的平均值,(1)是每一行的均值
+    std = df_raw[[args.target]].std(0)
+    df_data = df_raw[cols_data][-args.seq_len+1:-1]
+elif args.features == 'MS' or args.features == 'S':
+    mean = df_raw[[args.target]].mean(0)
+    std = df_raw[[args.target]].std(0)
+    df_data = df_raw[[args.target]][-args.seq_len+1:-1]
+
+mean = np.array(mean)
+std = np.array(std)
+
+
+def inverse_transform(mean,std,data):
+    mean = torch.from_numpy(mean).type_as(data).to(data.device) if torch.is_tensor(data) else mean
+    std = torch.from_numpy(std).type_as(data).to(data.device) if torch.is_tensor(data) else std
+    return (data * std) + mean
+
 def predict(exp, setting, load=False):
     pred_data, pred_loader = exp._get_data(flag='pred')   #这里用到了exp的get data
-
+    #调用getdata和data_loader
     if load:
         path = os.path.join(exp.args.checkpoints, setting)
         best_model_path = path + '/' + 'checkpoint.pth'
@@ -124,8 +152,8 @@ def predict(exp, setting, load=False):
     preds = []
 
     for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(pred_loader):
-        batch_x = batch_x.float().to(exp.device)
-        batch_y = batch_y.float()
+        batch_x = batch_x.float().to(exp.device)  #batch_x/y还都是正常的数
+        batch_y = batch_y.float()  #没有batch-y的输入
         # print('batch_x_mark')
         # print(batch_x_mark)
         batch_x_mark = batch_x_mark.float().to(exp.device)
@@ -133,7 +161,7 @@ def predict(exp, setting, load=False):
         # print(batch_x_mark.shape)   #torch.Size([1, 96, 4])
 
         # decoder input
-        if exp.args.padding == 0:
+        if exp.args.padding == 0:  #0填充
             dec_inp = torch.zeros([batch_y.shape[0], exp.args.pred_len, batch_y.shape[-1]]).float()
         elif exp.args.padding == 1:
             dec_inp = torch.ones([batch_y.shape[0], exp.args.pred_len, batch_y.shape[-1]]).float()
@@ -152,15 +180,23 @@ def predict(exp, setting, load=False):
                 outputs = exp.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
             else:
                 outputs = exp.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+
+        # print(type(outputs))
         f_dim = -1 if exp.args.features == 'MS' else 0
         batch_y = batch_y[:, -exp.args.pred_len:, f_dim:].to(exp.device)
 
         pred = outputs.detach().cpu().numpy()  # .squeeze()
-
+        # pred = outputs
         preds.append(pred)
 
-    preds = np.array(preds)
-    preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
+        # inverse_transform = inverse_transform()
+
+    preds = np.array(preds)  #四维数组 (1,1,48,7)
+    preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1]) #三维数组(1,48,7)
+    date_end = preds[0, :, :].tolist()
+
+    # print(preds)
+    # print(preds[:,:,-1])
 
     # result save
     folder_path = './results/pred_test' + '/'  #路径改一下，不知道可以不可以
@@ -170,12 +206,16 @@ def predict(exp, setting, load=False):
     np.save(folder_path + 'real_prediction.npy', preds)
     #应该是在这里改变加代码进行数据缩放
     #多返回应该batch_x_ark,以便于对时间的提取,如何将x_mark变为以前的样子？可以需要直接在dataset中得到？
+    if args.inverse:  # 如果数据缩放的话没调用
+        preds = preds[:,:,-1].flatten()
+        print(type(preds))  #ndarray
+        print(preds.shape)  #(48,)
+        preds = inverse_transform(mean, std,preds)
+        print(preds)
 
-    return preds
+    return preds,date_end
 
-prediction = predict(exp, setting, True)
-
-
+prediction , date_end= predict(exp, setting, True)
 
 
 def get_date_list(begin_date,end_date):
@@ -191,10 +231,9 @@ def get_date_list(begin_date,end_date):
 
 
 #--------历史数据和预测数据处理-----------
-#获取初始时间，之后可以需要得到多长时间的历史数据，作为历史数据的x
-df_raw = pd.read_csv(os.path.join(args.root_path,args.data_path))
-df_stamp = df_raw[['date']]   #取出指定范围内的序列数据的'date'列
-df_stamp['date'] = pd.to_datetime(df_stamp.date)  #时间格式的处理
+
+
+
 # print(df_stamp['date'])
 data_init = df_stamp['date'][int(-args.seq_len)+1:-1]
 # data_begin = data_init.tolist()
@@ -213,28 +252,35 @@ end_time = begin_time + datetime.timedelta(seconds=myfreq*(args.pred_len-1))
 print(end_time)
 pred_data = get_date_list(begin_time,end_time)
 #获取历史数据
-#作为历史数据的y:df_data
-if args.features == 'M':
-    cols_data = df_raw.columns[1:]  # 获取除了时间列以外的特征
-    df_data = df_raw[cols_data][-args.seq_len+1:-1]
-elif args.features == 'MS' or args.features == 'S':
-    df_data = df_raw[[args.target]][-args.seq_len+1:-1]
+
+
+# def fit(self, data):
+#     self.mean = data.mean(0)
+#     self.std = data.std(0)
 
 #将历史数据和预测的数据拼接起来
 data_x = data_begin + pred_data  #时间拼接,
 data_x = np.array(data_x)   #这个是转换为数组
+print('data_x.shape:')
+print(data_x.shape)
 
-date_begin = np.array(df_data).tolist()
-date_end = prediction[0,:,:].tolist()
-
-date_y = date_begin + date_end
+date_begin = np.array(df_data)[:,-1].tolist()
+# date_end = prediction[0,:,:].tolist()
+print('date_begin:')
+print(date_begin)
+print('prediction:')
+print(prediction)
+date_y = date_begin + prediction.tolist()
+# date_y = date_begin.extend(prediction)
 date_y = np.array(date_y)
-print(date_y[-1].shape)  #(144,7)
+print('date_y.shape:')
+print(date_y.shape)
+# print(date_y[-1].shape)  #(144,7)
 
 #plot
 plt.figure()
 # plt.figure(figsize=(6, 7))
-plt.plot(data_x,date_y[:,-1],label = 'prediction')   #0应该是time，应该将这里改为真实的数据集中的时间
+plt.plot(data_x,date_y,label = 'prediction')   #0应该是time，应该将这里改为真实的数据集中的时间
 plt.vlines(data_begin[-1], 0, 50, 'r', '--', label='pred_start')
 
 plt.xlabel('time',fontsize=11,)
@@ -245,68 +291,10 @@ plt.xticks(rotation = 23)
 plt.savefig('./img/pred_result_h2_inverse_false.png')
 plt.show()
 
-#没有下面这个也可以运行
 '''
-def predict(exp, setting, load=False):
-    pred_data, pred_loader = exp._get_data(flag='pred')   #这里用到了exp的get data
-
-    if load:
-        path = os.path.join(exp.args.checkpoints, setting)
-        best_model_path = path + '/' + 'checkpoint.pth'
-        exp.model.load_state_dict(torch.load(best_model_path))   #加载数据
-
-    exp.model.eval()
-
-    preds = []
-
-    for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(pred_loader):
-        batch_x = batch_x.float().to(exp.device)
-        batch_y = batch_y.float()
-        # print('batch_x_mark')
-        # print(batch_x_mark)
-        batch_x_mark = batch_x_mark.float().to(exp.device)
-        batch_y_mark = batch_y_mark.float().to(exp.device)
-        # print(batch_x_mark.shape)   #torch.Size([1, 96, 4])
-
-        # decoder input
-        if exp.args.padding == 0:
-            dec_inp = torch.zeros([batch_y.shape[0], exp.args.pred_len, batch_y.shape[-1]]).float()
-        elif exp.args.padding == 1:
-            dec_inp = torch.ones([batch_y.shape[0], exp.args.pred_len, batch_y.shape[-1]]).float()
-        else:
-            dec_inp = torch.zeros([batch_y.shape[0], exp.args.pred_len, batch_y.shape[-1]]).float()
-        dec_inp = torch.cat([batch_y[:, :exp.args.label_len, :], dec_inp], dim=1).float().to(exp.device)
-        # encoder - decoder
-        if exp.args.use_amp:
-            with torch.cuda.amp.autocast():
-                if exp.args.output_attention:
-                    outputs = exp.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
-                else:
-                    outputs = exp.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-        else:
-            if exp.args.output_attention:
-                outputs = exp.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
-            else:
-                outputs = exp.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-        f_dim = -1 if exp.args.features == 'MS' else 0
-        batch_y = batch_y[:, -exp.args.pred_len:, f_dim:].to(exp.device)
-
-        pred = outputs.detach().cpu().numpy()  # .squeeze()
-
-        preds.append(pred)
-
-    preds = np.array(preds)
-    preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
-
-    # result save
-    folder_path = './results/pred_test'  + '/'  #路径改一下，不知道可以不可以
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-
-    np.save(folder_path + 'real_prediction.npy', preds)
-    #应该是在这里改变加代码进行数据缩放
-    #多返回应该batch_x_ark,以便于对时间的提取,如何将x_mark变为以前的样子？可以需要直接在dataset中得到？
-
-    return preds
-prediction = predict(exp, setting, True)
+def inverse_transform(self, data):
+    mean = torch.from_numpy(self.mean).type_as(data).to(data.device) if torch.is_tensor(data) else self.mean
+    std = torch.from_numpy(self.std).type_as(data).to(data.device) if torch.is_tensor(data) else self.std
+    return (data * std) + mean
+    
 '''

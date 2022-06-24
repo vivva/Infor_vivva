@@ -50,6 +50,7 @@ class EncoderLayer(nn.Module):   #包括一个注意力层和两个卷积层512-
         x = x + self.dropout(new_x)   # x (32,96,512) ,相当于一个残差网络？
         # nex_x是attn中做过稀疏矩阵相乘的attention，而x是原来的词编码
 
+        #从这里开始，得到是标准化的x和y
         y = x = self.norm1(x)   #x进行标准化得到（标准化的x）和y
         y = self.dropout(self.activation(self.conv1(y.transpose(-1,1))))    #(32,2048,96)
         y = self.dropout(self.conv2(y).transpose(-1,1))     #(32,96,512)

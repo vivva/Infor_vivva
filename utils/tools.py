@@ -59,14 +59,18 @@ class StandardScaler():
         self.std = 1.
     
     def fit(self, data):
-        self.mean = data.mean(0)
+        self.mean = data.mean(0)  #这个是np求每一列的均值
         self.std = data.std(0)
+        print('self.std')
+        print(self.std)
+        print('self.mean')
+        print(self.mean)
 
     def transform(self, data):
         mean = torch.from_numpy(self.mean).type_as(data).to(data.device) if torch.is_tensor(data) else self.mean
         std = torch.from_numpy(self.std).type_as(data).to(data.device) if torch.is_tensor(data) else self.std
         return (data - mean) / std
-
+        #from_numpy就是把数组转换为张量，type_as是将前面的数据类型抓换为后面的数据类型
     def inverse_transform(self, data):  #反转
         mean = torch.from_numpy(self.mean).type_as(data).to(data.device) if torch.is_tensor(data) else self.mean
         std = torch.from_numpy(self.std).type_as(data).to(data.device) if torch.is_tensor(data) else self.std

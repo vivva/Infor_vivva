@@ -330,6 +330,7 @@ class Dataset_Pred(Dataset):
     def __init__(self, root_path, flag='pred', size=None, 
                  features='S', data_path='ETTh1.csv', 
                  target='OT', scale=True, inverse=True, timeenc=0, freq='15min', cols=None):
+        #把scale改成了false
         #将inverse改为true--vivva
         # size [seq_len, label_len, pred_len]
         # info
@@ -346,7 +347,7 @@ class Dataset_Pred(Dataset):
         
         self.features = features
         self.target = target
-        self.scale = scale
+        self.scale = scale   #这个是scale是true
         self.inverse = inverse
         self.timeenc = timeenc
         self.freq = freq
@@ -356,7 +357,8 @@ class Dataset_Pred(Dataset):
         self.__read_data__()
 
     def __read_data__(self):
-        self.scaler = StandardScaler()
+        self.scaler = StandardScaler()  #调用scaler了，mean=0，std=1,但是进去就是std=1，mean=0
+
         df_raw = pd.read_csv(os.path.join(self.root_path,
                                           self.data_path))
         '''
@@ -369,8 +371,8 @@ class Dataset_Pred(Dataset):
             cols = list(df_raw.columns); cols.remove(self.target); cols.remove('date')
         df_raw = df_raw[['date']+cols+[self.target]]
         
-        border1 = len(df_raw)-self.seq_len
-        border2 = len(df_raw)
+        border1 = len(df_raw)-self.seq_len  #border1:2
+        border2 = len(df_raw)   #border2:98
         
         if self.features=='M' or self.features=='MS':
             cols_data = df_raw.columns[1:]
@@ -378,12 +380,13 @@ class Dataset_Pred(Dataset):
         elif self.features=='S':
             df_data = df_raw[[self.target]]
 
-        if self.scale:
-            self.scaler.fit(df_data.values)
-            data = self.scaler.transform(df_data.values)
-        else:
-            data = df_data.values
-            
+        # if self.scale:  #进入
+        #     self.scaler.fit(df_data.values)
+        #     data = self.scaler.transform(df_data.values) #最后返回标准化之后的，计算train的mean和std
+        # else:
+        #     data = df_data.values
+        data = df_data.values  #vivva
+
         tmp_stamp = df_raw[['date']][border1:border2]
         tmp_stamp['date'] = pd.to_datetime(tmp_stamp.date)
         pred_dates = pd.date_range(tmp_stamp.date.values[-1], periods=self.pred_len+1, freq=self.freq)
@@ -393,7 +396,7 @@ class Dataset_Pred(Dataset):
         data_stamp = time_features(df_stamp, timeenc=self.timeenc, freq=self.freq[-1:])
 
         self.data_x = data[border1:border2]
-        if self.inverse:
+        if self.inverse:  #进入的是这个
             self.data_y = df_data.values[border1:border2]
         else:
             self.data_y = data[border1:border2]
@@ -406,7 +409,7 @@ class Dataset_Pred(Dataset):
         r_end = r_begin + self.label_len + self.pred_len
 
         seq_x = self.data_x[s_begin:s_end]
-        if self.inverse:
+        if self.inverse:  #进入
             seq_y = self.data_x[r_begin:r_begin+self.label_len]
         else:
             seq_y = self.data_y[r_begin:r_begin+self.label_len]
@@ -419,4 +422,5 @@ class Dataset_Pred(Dataset):
         return len(self.data_x) - self.seq_len + 1   #data_x每个数据集的数据条数-96+1，步长是1
 
     def inverse_transform(self, data):
+        print(self.scaler.inverse_transform(data))
         return self.scaler.inverse_transform(data)

@@ -110,7 +110,7 @@ class ProbAttention(nn.Module):  # 新提出的attention
 
     def forward(self, queries, keys, values, attn_mask):
         B, L_Q, H, D = queries.shape  #四维数组？（32，96，8，64）transpose过后的都是（32，8，96，64）
-        _, L_K, _, _ = keys.shape
+        _, L_K, _, _ = keys.shape   #L_K:96 _:64
         # print('attn_vivva_queries.shape:')    #torch.Size([32, 72, 8, 64])  [32, 96, 8, 64])  [32, 48, 8, 64]
         # print(queries.shape)
         # print('attn_vivva_B:')  #32
@@ -165,7 +165,7 @@ class AttentionLayer(nn.Module):
     def forward(self, queries, keys, values, attn_mask):
         B, L, _ = queries.shape   #B:32  L:96 _:512  含义应该是batchsize_length_width吧
         _, S, _ = keys.shape    #S:96
-        H = self.n_heads        #H:8
+        H = self.n_heads        #H:8  _:512
 
         #进行多分头，此时传入的Q K V都是（32，96，8，64）维度的，经过transpose过后的都是（32，8，96，64）维度的
         queries = self.query_projection(queries).view(B, L, H, -1)    #变成 32 96 8 64即(32,96,H,d model / H)进行分头
