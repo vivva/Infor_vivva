@@ -132,6 +132,10 @@ elif args.features == 'MS' or args.features == 'S':
 
 mean = np.array(mean)
 std = np.array(std)
+print('mean:')
+print(mean)
+print('std:')
+print(std)
 
 
 def inverse_transform(mean,std,data):
